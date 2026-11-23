@@ -9,32 +9,24 @@ resolvent, Pauli and Hadamard.
 | **Kähler die** | 2 flux-tunable transmons, 1 coupler | Pure-state space CP³ with the Fubini–Study metric and Kähler form |
 | **Hyperkähler die** | 3 transmons in a triangle, SU(2)-symmetric Heisenberg coupling | Quaternion triple I, J, K from -iσ; sphere of complex structures |
 
-## Run it on GitHub Codespaces (step by step)
+## Run it from an iPad or iPhone (no folders, no hidden files)
 
-1. **Unzip** the download. The files go directly at the top level, including the hidden `.devcontainer` folder.
-2. On github.com click **+ → New repository**, name it (e.g. `kahler-hyperkahler-chipset`), leave "Add a README" **unchecked**, click **Create repository**.
-3. **Upload the files.** Either:
-   - **Browser:** on the empty repo page click **uploading an existing file**, drag in everything from the unzipped folder (including `.devcontainer`), then **Commit changes**. On Mac, press Cmd+Shift+. in Finder to show the hidden folder; on Windows it is visible by default.
-   - **Terminal:** from inside the unzipped folder run
-
-         git init && git add -A && git commit -m "Initial commit"
-         git branch -M main
-         git remote add origin https://github.com/YOUR-USERNAME/kahler-hyperkahler-chipset.git
-         git push -u origin main
-
-4. On the repo page click **Code → Codespaces → Create codespace on main**.
-5. Wait for setup. The Codespace installs the requirements and runs all checks automatically; the PASS/FAIL output appears in the creation log.
-6. To rerun any time, open the terminal in the Codespace and run:
+1. **Unzip:** in the Files app, tap the zip. A folder appears with 6 files.
+2. **Make a repo:** in Safari go to github.com, sign in, tap **+ → New repository**. Name it, leave "Add a README" **unchecked**, tap **Create repository**.
+3. **Upload:** on the empty repo page tap **uploading an existing file**, tap **choose your files**, select all 6 files from the unzipped folder (tap **Select**, then select all), then tap **Commit changes**.
+4. **Open a Codespace:** on the repo page tap **Code → Codespaces → Create codespace on main**. If the buttons look cramped, use Safari’s **aA → Request Desktop Website**. Wait a minute for the editor to load.
+5. **Open the terminal:** tap the **☰ menu** (top left) **→ Terminal → New Terminal**.
+6. **Run everything with one command:**
 
        bash run_all.sh
 
-A healthy run prints 30 `PASS` and 0 `FAIL`, and writes `chipset_spec.json`.
+   It installs the requirements, then runs all three files. A healthy run ends with 30 `PASS` and 0 `FAIL`, and writes `chipset_spec.json`.
 
-**If something is off**
-- Setup did not run (the `.devcontainer` folder was not uploaded): in the terminal run `pip install -r requirements.txt` then `bash run_all.sh`.
-- Run a single file: `python chipset.py`, `python hyperkahler_unit.py` or `python kahler_hyperkahler_qiskit.py`.
+To run one file only: `python chipset.py`, `python hyperkahler_unit.py` or `python kahler_hyperkahler_qiskit.py` (run `pip install -r requirements.txt` once first).
 
-## Run locally
+Codespaces stop when idle and your files stay in the repo. Reopen from **Code → Codespaces**.
+
+## Run on a computer
 
     pip install -r requirements.txt
     bash run_all.sh
