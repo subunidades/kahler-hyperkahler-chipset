@@ -9,24 +9,27 @@ resolvent, Pauli and Hadamard.
 | **Kähler die** | 2 flux-tunable transmons, 1 coupler | Pure-state space CP³ with the Fubini–Study metric and Kähler form |
 | **Hyperkähler die** | 3 transmons in a triangle, SU(2)-symmetric Heisenberg coupling | Quaternion triple I, J, K from -iσ; sphere of complex structures |
 
-## Run it from an iPad or iPhone (no folders, no hidden files)
+## Run it on GitHub Codespaces
 
-1. **Unzip:** in the Files app, tap the zip. A folder appears with 7 files.
-2. **Make a repo:** in Safari go to github.com, sign in, tap **+ → New repository**. Name it, leave "Add a README" **unchecked**, tap **Create repository**.
-3. **Upload:** on the empty repo page tap **uploading an existing file**, tap **choose your files**, select all 7 files from the unzipped folder (tap **Select**, then select all), then tap **Commit changes**.
-4. **Open a Codespace:** on the repo page tap **Code → Codespaces → Create codespace on main**. If the buttons look cramped, use Safari’s **aA → Request Desktop Website**. Wait a minute for the editor to load.
-5. **Open the terminal:** tap the **☰ menu** (top left) **→ Terminal → New Terminal**.
-6. **Run everything with one command:**
+1. Unzip the download. It contains 7 files at the top level.
+2. On github.com create a new empty repository (leave "Add a README" unchecked).
+3. Upload all 7 files to the repository, either with **uploading an existing file** on the repo page, or with git:
+
+       git init && git add -A && git commit -m "Initial commit"
+       git branch -M main
+       git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPO.git
+       git push -u origin main
+
+4. On the repo page choose **Code, Codespaces, Create codespace on main**.
+5. Open a terminal in the Codespace and run:
 
        bash run_all.sh
 
-   It installs the requirements, then runs all three files. A healthy run ends with 33 lines containing `PASS` and none containing `FAIL`, and writes `chipset_spec.json`.
+   This installs the requirements if needed, then runs all three files. A healthy run ends with 33 lines containing `PASS` and none containing `FAIL`, and writes `chipset_spec.json`.
 
 To run one file only: `python chipset.py`, `python hyperkahler_unit.py` or `python kahler_hyperkahler_qiskit.py` (run `pip install -r requirements.txt` once first).
 
-Codespaces stop when idle and your files stay in the repo. Reopen from **Code → Codespaces**.
-
-## Run on a computer
+## Run locally
 
     pip install -r requirements.txt
     bash run_all.sh
