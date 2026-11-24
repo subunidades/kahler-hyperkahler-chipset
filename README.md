@@ -12,7 +12,7 @@ resolvent, Pauli and Hadamard.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["Operators"] --> B["Kähler core"]
     A --> C["Hyperkähler core"]
     B --> D["Kähler die<br/>2 qubits"]
