@@ -9,6 +9,48 @@ resolvent, Pauli and Hadamard.
 | **Kähler die** | 2 flux-tunable transmons, 1 coupler | Pure-state space CP³ with the Fubini–Study metric and Kähler form |
 | **Hyperkähler die** | 3 transmons in a triangle, SU(2)-symmetric Heisenberg coupling | Quaternion triple I, J, K from -iσ; sphere of complex structures |
 
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph P1["kahler_hyperkahler_qiskit.py"]
+        A["Operator zoo<br/>unitary, Hermitian, projector,<br/>density matrix, resolvent, Pauli, Hadamard"]
+        B["Kähler core<br/>quantum geometric tensor<br/>Fubini-Study metric and Kähler form"]
+        C["Hyperkähler core<br/>quaternion triple I, J, K<br/>built from the Pauli matrices"]
+        A --> B
+        A --> C
+    end
+
+    subgraph P2["hyperkahler_unit.py"]
+        U["3-qubit unit<br/>H = J times the sum of XX + YY + ZZ"]
+        V["SU(2) symmetry checks<br/>spectrum, native-gate circuit,<br/>Trotter error, orbit geometry"]
+        U --> V
+    end
+
+    subgraph P3["chipset.py"]
+        KD["Kähler die<br/>2 tunable transmons + coupler<br/>state space CP3"]
+        HD["Hyperkähler die<br/>3 transmons in a triangle<br/>SU(2) symmetric unit"]
+        NG["Native gates<br/>rz, sx, x, cz"]
+        TP["Transpile and verify<br/>Operator.equiv"]
+        TM["Transmon gate model<br/>leakage, conditional phase, fidelity"]
+        DT["Disorder tolerance<br/>SU(2) breaking vs frequency mismatch"]
+        OUT["chipset_spec.json"]
+        KD --> NG
+        HD --> NG
+        NG --> TP
+        NG --> TM
+        HD --> DT
+        TP --> OUT
+        TM --> OUT
+        DT --> OUT
+    end
+
+    B --> KD
+    C --> U
+    U --> HD
+    OUT --> NEXT["Next: choose a foundry, layout, EM simulation"]
+```
+
 ## Run it on GitHub Codespaces
 
 1. Unzip the download. It contains 7 files at the top level.
