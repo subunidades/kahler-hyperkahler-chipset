@@ -12,43 +12,17 @@ resolvent, Pauli and Hadamard.
 ## Architecture
 
 ```mermaid
-flowchart TD
-    subgraph P1["kahler_hyperkahler_qiskit.py"]
-        A["Operator zoo<br/>unitary, Hermitian, projector,<br/>density matrix, resolvent, Pauli, Hadamard"]
-        B["Kähler core<br/>quantum geometric tensor<br/>Fubini-Study metric and Kähler form"]
-        C["Hyperkähler core<br/>quaternion triple I, J, K<br/>built from the Pauli matrices"]
-        A --> B
-        A --> C
-    end
-
-    subgraph P2["hyperkahler_unit.py"]
-        U["3-qubit unit<br/>H = J times the sum of XX + YY + ZZ"]
-        V["SU(2) symmetry checks<br/>spectrum, native-gate circuit,<br/>Trotter error, orbit geometry"]
-        U --> V
-    end
-
-    subgraph P3["chipset.py"]
-        KD["Kähler die<br/>2 tunable transmons + coupler<br/>state space CP3"]
-        HD["Hyperkähler die<br/>3 transmons in a triangle<br/>SU(2) symmetric unit"]
-        NG["Native gates<br/>rz, sx, x, cz"]
-        TP["Transpile and verify<br/>Operator.equiv"]
-        TM["Transmon gate model<br/>leakage, conditional phase, fidelity"]
-        DT["Disorder tolerance<br/>SU(2) breaking vs frequency mismatch"]
-        OUT["chipset_spec.json"]
-        KD --> NG
-        HD --> NG
-        NG --> TP
-        NG --> TM
-        HD --> DT
-        TP --> OUT
-        TM --> OUT
-        DT --> OUT
-    end
-
-    B --> KD
-    C --> U
-    U --> HD
-    OUT --> NEXT["Next: choose a foundry, layout, EM simulation"]
+flowchart LR
+    A["Operators"] --> B["Kähler core"]
+    A --> C["Hyperkähler core"]
+    B --> D["Kähler die<br/>2 qubits"]
+    C --> E["Hyperkähler die<br/>3 qubits"]
+    D --> F["Native gates<br/>rz, sx, x, cz"]
+    E --> F
+    F --> G["Compile and verify"]
+    F --> H["Transmon gate model"]
+    G --> I["chipset_spec.json"]
+    H --> I
 ```
 
 ## Run it on GitHub Codespaces
