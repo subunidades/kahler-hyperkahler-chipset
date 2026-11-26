@@ -122,8 +122,8 @@ class Layout:
         if "short" in (start, end): s.shorted.add(net)
         return sp
 
-    def cross(s, net, cx, cy):
-        a, w = R["arm"], R["arm_w"]
+    def cross(s, net, cx, cy, arm=None):
+        a, w = (arm or R["arm"]), R["arm_w"]
         p = unary_union([box(cx - a, cy - w / 2, cx + a, cy + w / 2), box(cx - w / 2, cy - a, cx + w / 2, cy + a)])
         s.add(net, p); s.etch.append(p.buffer(R["island_clear"], join_style=2))
 
@@ -307,12 +307,15 @@ def drc(L, targets):
 
 # ---------------------------------------------------------------- shared readout chain
 def solve_resonator(wp_fn, target, X0):
-    f = lambda Lg, X: plen(rounded(wp_fn(Lg, X), R["bend_r"])) - target
+    """Match the target length with the serpentine leg length; if the route is still too long, shrink the
+    riser offset X, and as a last resort the coupling run Lc (minimum 100 um). Returns (Lg, X, Lc)."""
+    f = lambda Lg, X, Lc: plen(rounded(wp_fn(Lg, X, Lc), R["bend_r"])) - target
     Lmin = 115.
-    if f(Lmin, X0) <= 0:
-        Lg = brentq(lambda v: f(v, X0), Lmin, 2000.); return Lg, X0
-    X = brentq(lambda v: f(Lmin, v), 20., X0)
-    return Lmin, X
+    if f(Lmin, X0, 300.) <= 0:
+        return brentq(lambda v: f(v, X0, 300.), Lmin, 2000.), X0, 300.
+    if f(Lmin, 20., 300.) <= 0:
+        return Lmin, brentq(lambda v: f(Lmin, v, 300.), 20., X0), 300.
+    return Lmin, 20., brentq(lambda v: f(Lmin, 20., v), 100., 300.)
 
 
 def readout_chain(L, tag, res_specs, filter_len_um):
@@ -329,8 +332,9 @@ def readout_chain(L, tag, res_specs, filter_len_um):
     L.cpw([(xB - 20, 8820), (xo, 8820), tuple(top)], "OUT:line", start="open")
     L.strap((790, 8700), (0, 1), 11.); L.strap((xo, 9150), (1, 0), 11.)
     for name, wpf, target, X0 in res_specs:
-        Lg, X = solve_resonator(wpf, target, X0)
-        sp = L.cpw(wpf(Lg, X), f"{name}:res", start="open", end="short")
+        Lg, X, Lc = solve_resonator(wpf, target, X0)
+        sp = L.cpw(wpf(Lg, X, Lc), f"{name}:res", start="open", end="short")
+        L.info_res = getattr(L, "info_res", {}); L.info_res[name] = dict(leg_um=Lg, riser_offset_um=X, filter_run_um=Lc)
         L.lengths[f"{name} resonator"] = (plen(sp), target)
     return xB
 
@@ -346,27 +350,31 @@ def fmt_targets():
 
 
 # ---------------------------------------------------------------- Kähler die
-def build_kahler(P):
+def build_kahler(P, tune=None):
     L = Layout("KAHLER_DIE")
+    t = dict(arm_q=R["arm"], arm_cp=R["arm"], head_qc=None, head_qq=None, lq_K0=None, lq_K1=None, len_K0=1., len_K1=1.)
+    t.update(tune or {}); L.tune = t
     tr = P["transmons"]["kahler_die"]; s1, s2 = tr["side1_nm"] / 1000, tr["side2_nm"] / 1000
     cc, rs = P["capacitance"]["coupling_fF"], P["capacitance"]["resonators"]
     Jc = B("Jc_uA_per_um2"); cp = P["coupler"]
     Icc = q2.Ic_nA(cp["EJ_sum_GHz"]); d = B("squid_d")
     c1, c2 = (math.sqrt(Icc * (1 - d) / 2 * 1e-3 / Jc), math.sqrt(Icc * (1 + d) / 2 * 1e-3 / Jc))
-    y0 = 5000.; xs = {"K0": 4000., "CP": 5000., "K1": 6000.}; a = R["arm"]
+    y0 = 5000.; xs = {"K0": 4000., "CP": 5000., "K1": 6000.}
+    aq, acp = t["arm_q"], t["arm_cp"]; arms = {"K0": aq, "CP": acp, "K1": aq}
     for n, x in xs.items():
-        L.cross(f"{n}:island", x, y0)
-    L.squid(xs["K0"], y0 - a, s1, s2, "K0"); L.squid(xs["K1"], y0 - a, s1, s2, "K1"); L.squid(xs["CP"], y0 - a, c1, c2, "coupler")
-    hq, hd = max(8., cc["kahler_qc"] / CPL), max(8., cc["kahler_qq"] / CPL)
+        L.cross(f"{n}:island", x, y0, arms[n])
+    L.squid(xs["K0"], y0 - aq, s1, s2, "K0"); L.squid(xs["K1"], y0 - aq, s1, s2, "K1"); L.squid(xs["CP"], y0 - acp, c1, c2, "coupler")
+    hq = t["head_qc"] or max(8., cc["kahler_qc"] / CPL)
+    hd = t["head_qq"] or max(8., cc["kahler_qq"] / CPL)
     # qubit-coupler capacitors (heads face each other across 10 um at x = 4500 and 5500)
-    L.wire([(xs["K0"] + a, y0), (4500 - 13, y0)], "K0:wire", hq); L.wire([(xs["CP"] - a, y0), (4500 + 13, y0)], "CP:wire", hq)
-    L.wire([(xs["CP"] + a, y0), (5500 - 13, y0)], "CP:wire", hq); L.wire([(xs["K1"] - a, y0), (5500 + 13, y0)], "K1:wire", hq)
+    L.wire([(xs["K0"] + aq, y0), (4500 - 13, y0)], "K0:wire", hq); L.wire([(xs["CP"] - acp, y0), (4500 + 13, y0)], "CP:wire", hq)
+    L.wire([(xs["CP"] + acp, y0), (5500 - 13, y0)], "CP:wire", hq); L.wire([(xs["K1"] - aq, y0), (5500 + 13, y0)], "K1:wire", hq)
     # direct qubit-qubit capacitor over the coupler
     L.wire([(4300, y0), (4300, 5600), (5000 - 13, 5600)], "K0:wire", hd); L.wire([(5700, y0), (5700, 5600), (5000 + 13, 5600)], "K1:wire", hd)
     # flux (Z) and drive (XY) lines from the bottom edge
-    for n, xz in (("K0", 3940.), ("CP", 4940.), ("K1", 5940.)):
+    for n, xz, ar in (("K0", 3940., aq), ("CP", 4940., acp), ("K1", 5940., aq)):
         L.launcher(f"{n}Z:launcher", xz, 0, (0, 1), f"{n}_flux")
-        wp = [(xz, 600), (xz, y0 - a - 20)]
+        wp = [(xz, 600), (xz, y0 - ar - 20)]
         L.cpw(wp, f"{n}Z:line", end="short"); L.strap_line(wp)
     for n, xl, xe in (("K0", 2500., 3550.), ("K1", 7500., 6450.)):
         L.launcher(f"{n}XY:launcher", xl, 0, (0, 1), f"{n}_drive")
@@ -375,25 +383,26 @@ def build_kahler(P):
     # readout resonators side-coupled to the top arms, shared Purcell filter
     specs = []
     for n, sgn in (("K0", 1), ("K1", -1)):
-        r = rs[n]; lqr = r["C_qr_fF"] / CPL; x = xs[n] + sgn * 27.
-        wpf = (lambda x_, lq, sg: (lambda Lg, X: [(x_, y0 + a - lq), (x_, 6200.)] + serp(x_, 6200., Lg, sg)))(x, lqr, sgn)
-        specs.append((n, wpf, r["length_mm"] * 1e3, 0.))
+        r = rs[n]; lqr = t[f"lq_{n}"] or r["C_qr_fF"] / CPL; x = xs[n] + sgn * 27.
+        wpf = (lambda x_, lq, sg: (lambda Lg, X, Lc=300.: [(x_, y0 + aq - lq), (x_, 6200.)] + serp(x_, 6200., Lg, sg, Lc)))(x, lqr, sgn)
+        specs.append((n, wpf, r["length_mm"] * 1e3 * t[f"len_{n}"], 0.))
     fl = 2.99792458e8 / (2 * np.mean([rs[k]["f_res_GHz"] for k in rs if k.startswith("K")]) * 1e9 * math.sqrt(B("eps_eff"))) * 1e6
     readout_chain(L, "K", specs, fl)
-    marks_and_label(L, "KAHLER DIE v0.1 (Stage 3, generic rules)")
+    marks_and_label(L, "KAHLER DIE (generic rules)")
     L.info = {"coupling_head_um": {"qubit_coupler": hq, "qubit_qubit": hd}, "coupler_junction_sides_nm": [c1 * 1e3, c2 * 1e3]}
     return L
 
 
-# ---------------------------------------------------------------- hyperkähler die
-def build_hyper(P):
+def build_hyper(P, tune=None):
     L = Layout("HYPERKAHLER_DIE")
+    t = dict(arm_h=R["arm"], head_h=None, lq_H0=None, lq_H1=None, lq_H2=None, len_H0=1., len_H1=1., len_H2=1.)
+    t.update(tune or {}); L.tune = t
     tr = P["transmons"]["hyperkahler_die"]; s1, s2 = tr["side1_nm"] / 1000, tr["side2_nm"] / 1000
     cc, rs = P["capacitance"]["coupling_fF"], P["capacitance"]["resonators"]
-    a = R["arm"]; pos = {"H0": (3800., 4600.), "H1": (6200., 4600.), "H2": (5000., 5900.)}
+    a = t["arm_h"]; pos = {"H0": (3800., 4600.), "H1": (6200., 4600.), "H2": (5000., 5900.)}
     for n, (x, y) in pos.items():
-        L.cross(f"{n}:island", x, y); L.squid(x, y - a, s1, s2, n)
-    hh = max(8., cc["hyperkahler_edge"] / CPL)
+        L.cross(f"{n}:island", x, y, a); L.squid(x, y - a, s1, s2, n)
+    hh = t["head_h"] or max(8., cc["hyperkahler_edge"] / CPL)
     (x0, y0), (x1, y1), (x2, y2) = pos["H0"], pos["H1"], pos["H2"]
     zx, xyx = 4940., 5180.
     # H0-H1 wire along y0, interrupted twice by signal airbridges that pass over H2's flux and drive lines
@@ -422,17 +431,17 @@ def build_hyper(P):
     specs = []
 
     def mk(x_, y_, sg, lq):
-        def wp(Lg, X):
+        def wp(Lg, X, Lc=300.):
             xr = x_ - sg * (a + X)
-            return [(x_ - sg * (a - lq), y_ + 27.), (xr, y_ + 27.), (xr, 6500.)] + serp(xr, 6500., Lg, sg)
+            return [(x_ - sg * (a - lq), y_ + 27.), (xr, y_ + 27.), (xr, 6500.)] + serp(xr, 6500., Lg, sg, Lc)
         return wp
     for n, sgn in (("H0", 1), ("H1", -1)):
-        specs.append((n, mk(pos[n][0], pos[n][1], sgn, rs[n]["C_qr_fF"] / CPL), rs[n]["length_mm"] * 1e3, 290.))
-    lq2 = rs["H2"]["C_qr_fF"] / CPL
-    specs.append(("H2", lambda Lg, X: [(5027., y2 + a - lq2), (5027., 6800.)] + serp(5027., 6800., Lg, -1), rs["H2"]["length_mm"] * 1e3, 0.))
+        specs.append((n, mk(pos[n][0], pos[n][1], sgn, t[f"lq_{n}"] or rs[n]["C_qr_fF"] / CPL), rs[n]["length_mm"] * 1e3 * t[f"len_{n}"], 290.))
+    lq2 = t["lq_H2"] or rs["H2"]["C_qr_fF"] / CPL
+    specs.append(("H2", lambda Lg, X, Lc=300.: [(5027., y2 + a - lq2), (5027., 6800.)] + serp(5027., 6800., Lg, -1, Lc), rs["H2"]["length_mm"] * 1e3 * t["len_H2"], 0.))
     fl = 2.99792458e8 / (2 * np.mean([rs[k]["f_res_GHz"] for k in rs if k.startswith("H")]) * 1e9 * math.sqrt(B("eps_eff"))) * 1e6
     readout_chain(L, "H", specs, fl)
-    marks_and_label(L, "HYPERKAHLER DIE v0.1 (Stage 3, generic rules)")
+    marks_and_label(L, "HYPERKAHLER DIE (generic rules)")
     L.info = {"coupling_head_um": hh}
     return L
 
