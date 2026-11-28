@@ -40,13 +40,13 @@ A Codespace is a computer in the cloud that opens VS Code in your browser. You n
 
        bash run_all.sh
 
-   It runs seven Python files in order. The first six take a minute or two; the last one, `stage4_extract.py`, takes about 5 to 10 minutes. Run it this way rather than file by file, because `stage3_layout.py` needs the file `stage2_targets.json` that `stage2_quantization.py` writes.
-6. **Check it worked.** A healthy run prints 101 lines containing `PASS` and none containing `FAIL`. It also prints a few lines containing `NOT MET` near the end. That is expected (see Stage 4 results below) and is not an error. To count them:
+   It runs eight Python files in order. The first seven take a few minutes in total; the last one, `stage4_extract.py`, takes about 4 to 6 minutes. Run it this way rather than file by file, because `stage3_layout.py` needs the file `stage2_targets.json` that `stage2_quantization.py` writes.
+6. **Check it worked.** A healthy run prints 142 lines containing `PASS`, and none containing `FAIL` or `NOT MET`. To count them:
 
        bash run_all.sh | grep -c FAIL
 
    This should print `0`.
-7. **Get the results.** The run creates these files in the repository folder: `chipset_spec.json`, `stage1_budget.json`, `stage2_targets.json`, `stage3_layout_report.json`, `stage4_extracted.json`, `stage4_K.json`, `stage4_H.json`, four `.gds` layout files (`kahler_die.gds`, `hyperkahler_die.gds` and the two `*_stage4.gds` versions) and eight `.png` previews. Click a `.png` in the Explorer panel on the left to view it. To download a file, right-click it and choose **Download**. To open a `.gds` file you need a layout viewer such as KLayout (free), on your own computer.
+7. **Get the results.** The run creates these files in the repository folder: `chipset_spec.json`, `stage1_budget.json`, `stage2_targets.json`, `stage3_layout_report.json`, `stage3b_layout_report.json`, `stage4_v2_extracted.json`, `stage4_v2_K.json`, `stage4_v2_H.json`, the layout files `kahler_die.gds` and `hyperkahler_die.gds` (first floorplan) and `kahler_die_v2.gds`, `hyperkahler_die_v2.gds`, `kahler_die_v2_stage4.gds`, `hyperkahler_die_v2_stage4.gds` (compact layout), and `.png` previews. `stage4_ckpt_*.json` are progress files and can be ignored. Click a `.png` in the Explorer panel on the left to view it. To download a file, right-click it and choose **Download**. To open a `.gds` file you need a layout viewer such as KLayout (free), on your own computer.
 8. **Save your results (optional).** In the terminal run:
 
        git add -A
@@ -64,7 +64,7 @@ A Codespace is a computer in the cloud that opens VS Code in your browser. You n
 | `Permission denied` on `run_all.sh` | Run it with `bash run_all.sh` |
 | Some line contains `FAIL` | Copy that line and the lines above it and send them to whoever maintains the project |
 
-To run one file only: `python chipset.py`, `python stage1_budget.py`, `python stage2_quantization.py`, `python stage3_layout.py`, `python stage4_extract.py K` (or `H` for the other die), `python hyperkahler_unit.py` or `python kahler_hyperkahler_qiskit.py`.
+To run one file only: `python chipset.py`, `python stage1_budget.py`, `python stage2_quantization.py`, `python stage3_layout.py`, `python stage3b_layout.py`, `python stage4_extract.py K` (or `H` for the other die; add `v1` to measure the first floorplan), `python hyperkahler_unit.py` or `python kahler_hyperkahler_qiskit.py`.
 
 ## Run on your own computer
 
@@ -82,7 +82,8 @@ To run one file only: `python chipset.py`, `python stage1_budget.py`, `python st
 | `stage2_quantization.py` | **Stage 2.** Exact transmon (E_J, E_C) by charge-basis diagonalisation, flux bias and charge dispersion at every operating point, junction currents and sizes, target capacitance matrices, readout resonator lengths, tunable-coupler design, residual ZZ from the full coupled Hamiltonian. Writes `stage2_targets.json`. |
 | `stage3_layout.py` | **Stage 3.** Parametric layout of both dies from the Stage 2 targets: Xmon-style islands, SQUID junctions (two junction layers), coupling capacitors, flux and drive lines, side-coupled λ/4 readout resonators, a shared Purcell-filter hairpin, launchers, airbridges, alignment marks. Runs 29 design-rule checks under assumed rules. Writes `kahler_die.gds`, `hyperkahler_die.gds`, PNG previews and `stage3_layout_report.json`. |
 | `stage4_extract.py` | **Stage 4.** Built-in quasi-static capacitance solver (validated on a square plate), extraction of island, coupling and qubit-resonator capacitances in windows around each element, tuning of coupling-head widths and resonator couplings, resonator loading correction, design-rule re-check. Writes `stage4_extracted.json`, `stage4_K.json`, `stage4_H.json`, `kahler_die_stage4.gds` and `hyperkahler_die_stage4.gds`. |
-| `run_all.sh` | Runs all seven in order (installs requirements first if missing). |
+| `stage3b_layout.py` | **Stage 3b.** Compact re-layout of both dies from the Stage 2 targets, with the tuned values from Stage 4 built in (`TUNED_K`, `TUNED_H`). Same design-rule checks as Stage 3. Writes `kahler_die_v2.gds`, `hyperkahler_die_v2.gds`, previews and `stage3b_layout_report.json`. |
+| `run_all.sh` | Runs all eight in order (installs requirements first if missing). |
 | `requirements.txt` | qiskit >=1.3,<3 (tested on 1.3.0 and 2.6.2), qiskit-algorithms 0.4.0, numpy, scipy, plus gdstk, shapely and matplotlib for Stage 3. |
 | `requirements-dynamics.txt` | Optional, separate environment: Qiskit 1.3.0 + Qiskit Dynamics 0.6.0 for the transmon gate. |
 
@@ -94,8 +95,8 @@ To run one file only: `python chipset.py`, `python stage1_budget.py`, `python st
 | 1 | Flux noise, DRAG, readout and Purcell, error budget (`stage1_budget.py`) | Done, gates pass |
 | 2 | Circuit quantization: capacitance matrices, junctions, coupler (`stage2_quantization.py`) | Done, gates pass |
 | 3 | Parametric GDS and design-rule checks (`stage3_layout.py`, gdstk + shapely) | Done, 29/29 checks pass |
-| 4 | Capacitance extraction and tuning (`stage4_extract.py`, built-in solver) | Done, but the capacitance budget is NOT MET: see below |
-| 3b | Compact re-layout of both dies to fit the capacitance budget | Next |
+| 3b | Compact re-layout of both dies (`stage3b_layout.py`) | Done, 29/29 checks pass |
+| 4 | Capacitance extraction and tuning (`stage4_extract.py`, built-in solver) | Done: every capacitance within 3.2% of the Stage 2 targets |
 | 5 | Re-run Qiskit loop with extracted values, yield Monte Carlo | Not started |
 | 6 | Full-chip and package level (box modes, launchers, dicing) | Not started |
 | 7 | Foundry swap (J_c, spread, stack, DRC deck) and tapeout package | Needs a foundry |
@@ -126,13 +127,22 @@ To run one file only: `python chipset.py`, `python stage1_budget.py`, `python st
 
 **What Stage 3 does not give you:** the capacitances, couplings and resonator frequencies of this geometry are not yet known. Island sizes and coupling lengths use an assumed 0.08 fF per µm of facing edge. The junction layers are an idealised overlap, not a process-specific shadow-evaporation design. The design rules are generic. Resonator-to-filter coupling length (300 µm) and filter coupling gaps are starting guesses. Stage 4 extracts the real values and the layout is adjusted until they match the Stage 2 targets.
 
-### Stage 4 results (built-in solver, about 5% accuracy)
+### Stage 3b and Stage 4 results (compact layout, built-in solver, about 5% accuracy)
 
 - **Solver.** Quasi-static method of moments for zero-thickness conductors on an infinite silicon half-space. A 100 µm square plate comes out within 1.4% (fine mesh) and 1.2% (production mesh) of the reference value. It ignores metal thickness, substrate thickness and the package, so treat it as a design-loop tool, not sign-off. Palace or Elmer is still needed for that.
-- **Main finding: the Stage 3 floorplan is over its capacitance budget.** A bare 8 µm coupling wire adds about 0.105 fF per µm, and the island cross alone (arms 210 µm) is already 105 fF. Each qubit carries 1.5 to 4.2 mm of arm and wire (the hyperkähler H0 qubit has 4.2 mm), so the total capacitance is 265 fF (Kähler qubits), 175 fF (coupler) and 195-211 fF (hyperkähler qubits), against targets of 97-100 fF. Tuning cannot fix this; the layout needs a compact re-layout in which each qubit has roughly 880 µm of conductor in total.
-- **What did tune to target:** Kähler qubit-coupler capacitor 3.44 fF (target 3.46) and qubit-resonator capacitors within 3%; hyperkähler edges H0-H2 and H1-H2 0.574 fF (target 0.578) and qubit-resonator capacitors within 4%.
-- **What did not:** the Kähler direct qubit-qubit capacitor cannot go below 0.58 fF (target 0.29) because the two long branch wires couple to each other; the hyperkähler H0-H1 edge is 17% low because one head width serves all three edges.
-- **Resonator loading.** The qubit lowers each resonator by about 0.8-0.9% (for example 5.698 instead of 5.75 GHz), so the resonators were shortened by that amount in the `*_stage4.gds` files. The tuned layouts pass all 14 and 15 design-rule checks.
+- **First finding (first floorplan, `python stage4_extract.py KH v1`).** A bare 8 µm coupling wire adds about 0.105 fF per µm and the island cross alone is 105 fF. Each qubit carried 1.5 to 4.2 mm of arm and wire, so qubit capacitance was 265 fF (Kähler), 175 fF (coupler) and 195-211 fF (hyperkähler), against targets of 97-100 fF.
+- **Compact re-layout (Stage 3b).** Islands about 640-960 µm apart, coupling through short arm tips, 12 µm arms, a pad on the coupler and on H2, about 1.0-1.5 mm of conductor per qubit. Stage 4 then tuned the arm lengths, coupling gaps and resonator coupling lengths. The tuned values are built into `stage3b_layout.py`, so a fresh run starts converged and checks them.
+- **Result.** Every capacitance is within 3.2% of the Stage 2 target, and both dies pass all their design-rule checks (14 and 15).
+
+| Quantity | Target (fF) | Kähler die | Hyperkähler die |
+|---|---|---|---|
+| Qubit capacitance | 97.3 / 96.4 | 99.5, 99.8 | 96.0, 94.5, 96.0 |
+| Coupler capacitance | 100 | 98.1 | n/a |
+| Qubit-coupler capacitor / edge capacitors | 3.46 / 0.578 | 3.50, 3.50 | 0.588, 0.588, 0.593 |
+| Direct qubit-qubit capacitor | 0.293 | 0.291 | n/a |
+| Qubit-resonator capacitors | 6.75, 7.51 / 8.15, 6.99, 6.08 | 6.85, 7.47 | 8.07, 6.96, 6.27 |
+
+- **Resonator loading.** The qubit lowers each resonator by about 0.8-0.9% (for example 5.70 instead of 5.75 GHz), so the resonators are shortened by that amount in the `*_v2_stage4.gds` files.
 
 ## Design parameters (generic baseline)
 
@@ -168,5 +178,5 @@ Main finding: with fixed-frequency qubits the as-fabricated spread gives σ_f �
 - Flux-noise numbers use the standard 1/f model and are order-of-magnitude. Readout SNR is approximate.
 - Gate numbers come from 3-5 level transmon models. The CZ uses a square flux pulse (no ramp, no distortion) with Lindblad T1/T2 only; crosstalk and TLS defects are not modelled, and the tunable coupler is represented only by an effective g.
 - The Monte Carlo yield criteria (reachable parking frequencies, rms disorder below `su2_tol_MHz`) are design targets chosen here, not published thresholds.
-- The capacitances in the Stage 4 results come from a built-in solver with about 5% accuracy and no package model. The resonator-to-filter coupling lengths are still starting guesses, and the filter coupling strengths have not been simulated.
-- Next steps: a compact re-layout (Stage 3b) and a re-run of Stage 4, then Stage 5 re-simulation with extracted values, package level, and finally the foundry swap.
+- The capacitances in the Stage 4 results come from a built-in solver with about 5% accuracy and no package model. The resonator-to-filter coupling lengths are still starting guesses, and the filter coupling strengths, crosstalk and flux-line coupling have not been simulated. The compact layouts have not been checked in a full-wave or FEM solver.
+- Next steps: Stage 5 (re-run the circuit simulations with the extracted capacitances and check the readout filter), a full-wave or FEM check, package level, and finally the foundry swap.

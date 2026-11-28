@@ -33,7 +33,7 @@ print = functools.partial(print, flush=True)
 EPS0 = 8.8541878128e-12
 C_LIGHT = 2.99792458e8
 EPS_EFF = B("eps_eff")
-PITCH, GRAD, SMAX = 3.0, 1.5, 32          # raster pitch (um), grading factor, largest cell (pixels)
+PITCH, GRAD, SMAX = 3.0, 3.0, 32          # raster pitch (um), grading factor, largest cell (pixels)
 MARK = lambda c: "PASS" if c else "NOT MET"
 
 
@@ -150,13 +150,18 @@ def cell(r, a, b=None):
     return r["C"][i, i] if b is None else -r["C"][i, r["names"].index(b)]
 
 
+def win_of(L, key, default, pitch=PITCH):
+    cx, cy, w, h = L.win[key] if getattr(L, "win", None) else default
+    return make_window(cx, cy, w, h, pitch)
+
+
 def metrics_K(L, pitch=PITCH):
     m = {}
-    r = extract(L, make_window(4200, 5200, 1344, 1216, pitch), pitch)
+    r = extract(L, win_of(L, "K0", (4200, 5200, 1344, 1216), pitch), pitch)
     m["Csig_K0"], m["C_qr_K0"] = cell(r, "K0"), cell(r, "K0", "K0:res")
-    r = extract(L, make_window(5800, 5200, 1344, 1216, pitch), pitch)
+    r = extract(L, win_of(L, "K1", (5800, 5200, 1344, 1216), pitch), pitch)
     m["Csig_K1"], m["C_qr_K1"] = cell(r, "K1"), cell(r, "K1", "K1:res")
-    r = extract(L, make_window(5000, 5200, 1344, 1216, pitch), pitch)
+    r = extract(L, win_of(L, "CP", (5000, 5200, 1344, 1216), pitch), pitch)
     m["Csig_CP"], m["C_qq"] = cell(r, "CP"), cell(r, "K0", "K1")
     m["C_qc_K0"], m["C_qc_K1"] = cell(r, "CP", "K0"), cell(r, "CP", "K1")
     m["cells"] = r["cells"]
@@ -166,50 +171,75 @@ def metrics_K(L, pitch=PITCH):
 def metrics_H(L, pitch=PITCH):
     m = {}
     for n, cx in (("H0", 3800), ("H1", 6200)):
-        r = extract(L, make_window(cx, 4650, 1280, 1152, pitch), pitch)
+        r = extract(L, win_of(L, n, (cx, 4650, 1280, 1152), pitch), pitch)
         m[f"Csig_{n}"], m[f"C_qr_{n}"] = cell(r, n), cell(r, n, f"{n}:res")
-    r = extract(L, make_window(5000, 5950, 1536, 1152, pitch), pitch)
+    r = extract(L, win_of(L, "H2", (5000, 5950, 1536, 1152), pitch), pitch)
     m["Csig_H2"], m["C_qr_H2"] = cell(r, "H2"), cell(r, "H2", "H2:res")
     m["C_e02"], m["C_e12"] = cell(r, "H2", "H0"), cell(r, "H2", "H1")
-    m["C_e01"] = cell(extract(L, make_window(5500, 4600, 512, 448, pitch), pitch), "H0", "H1")
+    m["C_e01"] = cell(extract(L, win_of(L, "HE", (5500, 4600, 512, 448), pitch), pitch), "H0", "H1")
     m["cells"] = r["cells"]
     return m
 
 
 # ---------------------------------------------------------------- tuning
-def tune(build, metrics_fn, specs, label, iters=9, tol=0.02, delta=0.15):
-    """specs: {param: (metric names, target, (lo, hi), start)}; each parameter drives the mean of its metrics."""
+def tune_group(build, metrics_fn, specs, label, fixed, iters=4, tol=0.03):
+    """specs: {param: (metric names, target, (lo, hi), start[, sign[, initial sensitivity]])}. Newton steps with
+    a secant update; the sign of each sensitivity is enforced, so noise cannot push a parameter the wrong way."""
     names = list(specs)
+    sign = {k: (specs[k][4] if len(specs[k]) > 4 else 1.0) for k in names}
+
     def ev(p):
-        L = build(p); L.build()
+        L = build({**fixed, **p}); L.build()
         m = metrics_fn(L)
         return {k: float(np.mean([m[x] for x in specs[k][0]])) for k in names}, m
     p = {k: specs[k][3] for k in names}
     got, raw = ev(p)
+    sens = {k: sign[k] * (specs[k][5] if len(specs[k]) > 5 else max(got[k], 1e-6) / p[k]) for k in names}
     hist = [(dict(p), dict(got))]
-    q = {k: float(np.clip(p[k] * (1 + delta), *specs[k][2])) for k in names}
-    got2, raw = ev(q); hist.append((dict(q), dict(got2)))
-    sens = {k: (got2[k] - got[k]) / (q[k] - p[k]) if abs(q[k] - p[k]) > 1e-9 else 1.0 for k in names}
-    p, got = q, got2
-    for it in range(iters):
+    best = None
+    for it in range(iters + 1):
         err = {k: (specs[k][1] - got[k]) / specs[k][1] for k in names}
+        score = max(abs(e) for e in err.values())
+        if best is None or score < best[0]:
+            best = (score, dict(p), dict(got), raw)
         print(f"  {label} iteration {it}: " + ", ".join(f"{k}={p[k]:.1f} ({100 * -err[k]:+.1f}%)" for k in names))
-        stuck = lambda k: (p[k] <= specs[k][2][0] + 1e-6 and err[k] < 0) or (p[k] >= specs[k][2][1] - 1e-6 and err[k] > 0)
-        if all(abs(e) < tol or stuck(k) for k, e in err.items()):
+        stuck = lambda k: (p[k] <= specs[k][2][0] + 1e-6 and err[k] * sign[k] < 0) or (p[k] >= specs[k][2][1] - 1e-6 and err[k] * sign[k] > 0)
+        if it == iters or all(abs(e) < tol or stuck(k) for k, e in err.items()):
             break
-        new = {}
-        for k in names:
-            lo, hi = specs[k][2]
-            new[k] = float(np.clip(p[k] + 0.9 * (specs[k][1] - got[k]) / (sens[k] if abs(sens[k]) > 1e-9 else 1.0), lo, hi))
+        new = {k: float(np.clip(p[k] + 0.9 * (specs[k][1] - got[k]) / sens[k], *specs[k][2])) for k in names}
         g_new, raw = ev(new)
         for k in names:
             if abs(new[k] - p[k]) > 1e-3 * p[k]:
                 s_ = (g_new[k] - got[k]) / (new[k] - p[k])
-                if s_ * sens[k] > 0:
+                if s_ * sign[k] > 0:
                     sens[k] = s_
         p, got = new, g_new
         hist.append((dict(p), dict(got)))
-    return p, got, raw, hist
+    return best[1], best[2], best[3], hist, best[0]
+
+
+def tune(build, metrics_fn, specs, label, iters=3, tol=0.04):
+    """Four groups: couplings, capacitance knobs, couplings again (the pad moves them), capacitance again.
+    Progress is checkpointed so a long run can be resumed (set STAGE4_RESUME=1)."""
+    import os
+    ck = f"stage4_ckpt_{''.join(c for c in label if c.isalnum())}.json"
+    state = json.load(open(ck)) if (os.environ.get("STAGE4_RESUME") and os.path.exists(ck)) else {"done": 0, "p": {}, "raw": {}}
+    A = {k: v for k, v in specs.items() if k.startswith(("head", "gap", "lq"))}
+    Bs = {k: v for k, v in specs.items() if k not in A}
+    plan = [("couplings", A, iters), ("capacitance", Bs, iters), ("couplings (pass 2)", A, 2), ("capacitance (pass 2)", Bs, 2),
+            ("couplings (pass 3)", A, 2), ("capacitance (pass 3)", Bs, 1)]
+    for step, (nm, grp, it) in enumerate(plan):
+        if step < state["done"] or not grp:
+            continue
+        start = {k: (v[0], v[1], v[2], state["p"].get(k, v[3])) + tuple(v[4:]) for k, v in grp.items()}
+        fixed = {k: x for k, x in state["p"].items() if k not in grp}
+        p, got, raw, hist, score = tune_group(build, metrics_fn, start, f"{label} {nm}", fixed, it, tol)
+        state["p"].update(p); state["raw"] = raw; state["done"] = step + 1
+        state.setdefault("score", {})[str(step)] = score
+        if step == 1 and max(state["score"].get("0", 1), state["score"].get("1", 1)) < tol:
+            state["done"] = len(plan)                                   # first pass already within tolerance
+        json.dump(state, open(ck, "w"))
+    return state["p"], None, state["raw"], None
 
 
 # ---------------------------------------------------------------- resonator loading
@@ -253,16 +283,16 @@ def status_rows(prefix, vals, targets, tolfrac=0.05):
     return rows
 
 
-def conductor_length(L, group_name):
+def conductor_length(L, group_name, arm_w=None):
     """Approximate attached conductor length (um): arms plus wires, from polygon area / width."""
     tot = 0.0
     for n, g in L.net_u.items():
         if s3.group(n) == group_name and (s3.kind(n) == "island" or s3.kind(n).startswith("wire")):
-            tot += g.area / (s3.R["arm_w"] if s3.kind(n) == "island" else s3.R["wire_w"])
+            tot += g.area / ((arm_w or s3.R["arm_w"]) if s3.kind(n) == "island" else s3.R["wire_w"])
     return tot
 
 
-def main(which):
+def main(which, layout="v2"):
     P = s3.fmt_targets()
     Z0, v, Cl = cpw_line()
     tr, cc, rs = P["transmons"], P["capacitance"]["coupling_fF"], P["capacitance"]["resonators"]
@@ -279,31 +309,53 @@ def main(which):
     print(f" island alone (cross, arms 210 um, 24 um wide): {Ccross:.1f} fF = {Ccross / (4 * 210):.3f} fF per um of arm; "
           f"a bare 8 um coupling wire adds about 0.105 fF per um")
 
+    v2 = layout == "v2"
+    if v2:
+        import stage3b_layout as lay
+        bk, bh, aw = (lambda t: lay.build_kahler(P, t)), (lambda t: lay.build_hyper(P, t)), 12.
+        specK = {"head_qc": (["C_qc_K0", "C_qc_K1"], cc["kahler_qc"], (6., 150.), 40.),
+                 "gap_qq": (["C_qq"], cc["kahler_qq"], (10., 150.), 30., -1.0, 0.02),
+                 "lq_K0": (["C_qr_K0"], rs["K0"]["C_qr_fF"], (10., 150.), rs["K0"]["C_qr_fF"] / s3.CPL),
+                 "lq_K1": (["C_qr_K1"], rs["K1"]["C_qr_fF"], (10., 150.), rs["K1"]["C_qr_fF"] / s3.CPL),
+                 "aqL": (["Csig_K0", "Csig_K1"], CsK, (0., 300.), 30., 1.0, 0.12), "pad_cp": (["Csig_CP"], CsC, (20., 200.), 70., 1.0, 0.5)}
+        specH = {"gap_h02": (["C_e02"], cc["hyperkahler_edge"], (10., 150.), 30., -1.0, 0.01),
+                 "gap_h12": (["C_e12"], cc["hyperkahler_edge"], (10., 150.), 30., -1.0, 0.01),
+                 "gap01": (["C_e01"], cc["hyperkahler_edge"], (8., 34.), 20., -1.0, 0.01),
+                 "lq_H0": (["C_qr_H0"], rs["H0"]["C_qr_fF"], (10., 170.), rs["H0"]["C_qr_fF"] / s3.CPL),
+                 "lq_H1": (["C_qr_H1"], rs["H1"]["C_qr_fF"], (10., 170.), rs["H1"]["C_qr_fF"] / s3.CPL),
+                 "lq_H2": (["C_qr_H2"], rs["H2"]["C_qr_fF"], (10., 170.), rs["H2"]["C_qr_fF"] / s3.CPL),
+                 "aL0": (["Csig_H0"], CsH, (190., 420.), 190., 1.0, 0.12), "aL1": (["Csig_H1"], CsH, (190., 420.), 190., 1.0, 0.12),
+                 "aH2U": (["Csig_H2"], CsH, (250., 600.), 330., 1.0, 0.1)}
+        specK = {k: (v[0], v[1], v[2], lay.TUNED_K[k]) + tuple(v[4:]) for k, v in specK.items()}
+        specH = {k: (v[0], v[1], v[2], lay.TUNED_H[k]) + tuple(v[4:]) for k, v in specH.items()}
+        zk, zh = ((4000, 6000), (4300, 5600)), ((4000, 6000), (4300, 5400))
+    else:
+        bk, bh, aw = (lambda t: s3.build_kahler(P, t)), (lambda t: s3.build_hyper(P, t)), None
+        specK = {"head_qc": (["C_qc_K0", "C_qc_K1"], cc["kahler_qc"], (6., 150.), cc["kahler_qc"] / s3.CPL),
+                 "head_qq": (["C_qq"], cc["kahler_qq"], (6., 100.), 8.),
+                 "lq_K0": (["C_qr_K0"], rs["K0"]["C_qr_fF"], (10., 190.), rs["K0"]["C_qr_fF"] / s3.CPL),
+                 "lq_K1": (["C_qr_K1"], rs["K1"]["C_qr_fF"], (10., 190.), rs["K1"]["C_qr_fF"] / s3.CPL)}
+        specH = {"head_h": (["C_e01", "C_e02", "C_e12"], cc["hyperkahler_edge"], (6., 100.), 8.),
+                 "lq_H0": (["C_qr_H0"], rs["H0"]["C_qr_fF"], (10., 190.), rs["H0"]["C_qr_fF"] / s3.CPL),
+                 "lq_H1": (["C_qr_H1"], rs["H1"]["C_qr_fF"], (10., 190.), rs["H1"]["C_qr_fF"] / s3.CPL),
+                 "lq_H2": (["C_qr_H2"], rs["H2"]["C_qr_fF"], (10., 190.), rs["H2"]["C_qr_fF"] / s3.CPL)}
+        zk, zh = ((3300, 6700), (4300, 6800)), ((2800, 7300), (4000, 6500))
+    tagv, fv = ("_v2" if v2 else ""), ("v2_" if v2 else "")
     dies = {
-        "K": dict(name="Kähler die", tag="kahler", build=lambda t: s3.build_kahler(P, t), mfn=metrics_K, groups=["K0", "CP", "K1"],
-                  specs={"head_qc": (["C_qc_K0", "C_qc_K1"], cc["kahler_qc"], (6., 150.), cc["kahler_qc"] / s3.CPL),
-                         "head_qq": (["C_qq"], cc["kahler_qq"], (6., 100.), 8.),
-                         "lq_K0": (["C_qr_K0"], rs["K0"]["C_qr_fF"], (10., 190.), rs["K0"]["C_qr_fF"] / s3.CPL),
-                         "lq_K1": (["C_qr_K1"], rs["K1"]["C_qr_fF"], (10., 190.), rs["K1"]["C_qr_fF"] / s3.CPL)},
+        "K": dict(name="Kähler die", tag="kahler", build=bk, mfn=metrics_K, groups=["K0", "CP", "K1"], specs=specK,
                   targets={"C_qc_K0": cc["kahler_qc"], "C_qc_K1": cc["kahler_qc"], "C_qq": cc["kahler_qq"], "C_qr_K0": rs["K0"]["C_qr_fF"],
-                           "C_qr_K1": rs["K1"]["C_qr_fF"], "Csig_K0": CsK, "Csig_K1": CsK, "Csig_CP": CsC},
-                  zoom=((3300, 6700), (4300, 6800))),
-        "H": dict(name="Hyperkähler die", tag="hyperkahler", build=lambda t: s3.build_hyper(P, t), mfn=metrics_H, groups=["H0", "H1", "H2"],
-                  specs={"head_h": (["C_e01", "C_e02", "C_e12"], cc["hyperkahler_edge"], (6., 100.), 8.),
-                         "lq_H0": (["C_qr_H0"], rs["H0"]["C_qr_fF"], (10., 190.), rs["H0"]["C_qr_fF"] / s3.CPL),
-                         "lq_H1": (["C_qr_H1"], rs["H1"]["C_qr_fF"], (10., 190.), rs["H1"]["C_qr_fF"] / s3.CPL),
-                         "lq_H2": (["C_qr_H2"], rs["H2"]["C_qr_fF"], (10., 190.), rs["H2"]["C_qr_fF"] / s3.CPL)},
+                           "C_qr_K1": rs["K1"]["C_qr_fF"], "Csig_K0": CsK, "Csig_K1": CsK, "Csig_CP": CsC}, zoom=zk),
+        "H": dict(name="Hyperkähler die", tag="hyperkahler", build=bh, mfn=metrics_H, groups=["H0", "H1", "H2"], specs=specH,
                   targets={"C_e01": cc["hyperkahler_edge"], "C_e02": cc["hyperkahler_edge"], "C_e12": cc["hyperkahler_edge"],
                            "C_qr_H0": rs["H0"]["C_qr_fF"], "C_qr_H1": rs["H1"]["C_qr_fF"], "C_qr_H2": rs["H2"]["C_qr_fF"],
-                           "Csig_H0": CsH, "Csig_H1": CsH, "Csig_H2": CsH},
-                  zoom=((2800, 7300), (4000, 6500)))}
+                           "Csig_H0": CsH, "Csig_H1": CsH, "Csig_H2": CsH}, zoom=zh)}
     for key in which:
         d = dies[key]; t0 = time.time()
         print(f"{d['name']}: extraction of the Stage 3 layout, then tuning of coupling capacitors and resonator couplings")
         L0 = d["build"]({}); L0.build(); m0 = d["mfn"](L0)
         for g_ in d["groups"]:
-            print(f"  {g_}: {conductor_length(L0, g_):.0f} um of attached arm and wire conductor")
-        p, got, raw, hist = tune(d["build"], d["mfn"], d["specs"], d["name"], iters=5, tol=0.03)
+            print(f"  {g_}: {conductor_length(L0, g_, aw):.0f} um of attached arm and wire conductor")
+        p, got, raw, hist = tune(d["build"], d["mfn"], d["specs"], d["name"], iters=4, tol=0.05)
         corr = {}
         for n in [k.split("_")[1] for k in d["specs"] if k.startswith("lq_")]:
             Cq, Cs = raw[f"C_qr_{n}"], raw[f"Csig_{n}"]
@@ -319,8 +371,8 @@ def main(which):
         rows = status_rows(key, mf, d["targets"])
         L1.stitch(); L1.build()
         res = s3.drc(L1, None); bad = [r for r in res if not r["pass"]]
-        print(f" {d['tag']} die, {len(res)} design-rule checks on the tuned layout: {ok(not bad)}" + (f"  failed: {[r['check'] for r in bad]}" if bad else ""))
-        s3.to_gds(L1, f"{d['tag']}_die_stage4.gds"); s3.draw(L1, f"{d['tag']}_die_stage4.png"); s3.draw(L1, f"{d['tag']}_die_stage4_zoom.png", *d["zoom"])
+        print(f" {d['tag']} die, {len(res)} design-rule checks on the tuned layout: {ok(not bad)}" + (f"  failed: {[(r['check'], r['detail']) for r in bad]}" if bad else ""))
+        s3.to_gds(L1, f"{d['tag']}_die_{fv}stage4.gds"); s3.draw(L1, f"{d['tag']}_die_{fv}stage4.png"); s3.draw(L1, f"{d['tag']}_die_{fv}stage4_zoom.png", *d["zoom"])
         coup_ok = all(r["met"] for r in rows if not r["metric"].startswith("Csig"))
         csig_ok = all(r["met"] for r in rows if r["metric"].startswith("Csig"))
         print(f" {d['name']}: coupling capacitors and resonator couplings within 5% of Stage 2: {MARK(coup_ok)}")
@@ -329,16 +381,16 @@ def main(which):
         json.dump({"tune": tf, "untuned": {k: float(x) for k, x in m0.items()}, "tuned": {k: float(x) for k, x in mf.items()}, "targets": rows,
                    "resonators": corr, "drc_pass": not bad, "n_checks": len(res), "validation_fF": [want, c_f, c_p], "cross_arm210_fF": Ccross,
                    "solver": {"eps_eff": EPS_EFF, "pitch_um": PITCH, "grading": GRAD, "note": "quasi-static MoM, zero-thickness, infinite substrate, about 5% accuracy"}},
-                  open(f"stage4_{key}.json", "w"), indent=2, default=float)
-    done = [k for k in "KH" if __import__("os").path.exists(f"stage4_{k}.json")]
-    json.dump({k: json.load(open(f"stage4_{k}.json")) for k in done}, open("stage4_extracted.json", "w"), indent=2)
+                  open(f"stage4{tagv}_{key}.json", "w"), indent=2, default=float)
+    done = [k for k in "KH" if __import__("os").path.exists(f"stage4{tagv}_{k}.json")]
+    json.dump({k: json.load(open(f"stage4{tagv}_{k}.json")) for k in done}, open(f"stage4{tagv}_extracted.json", "w"), indent=2)
     if len(done) == 2:
-        worst = max(r["extracted_fF"] / r["target_fF"] for k in done for r in json.load(open(f"stage4_{k}.json"))["targets"] if r["metric"].startswith("Csig"))
+        worst = max(r["extracted_fF"] / r["target_fF"] for k in done for r in json.load(open(f"stage4{tagv}_{k}.json"))["targets"] if r["metric"].startswith("Csig"))
         if worst > 1.05:
-            print(f"FINDING: the Stage 3 floorplan is over its capacitance budget by up to {worst:.1f}x, because the coupling wires are long.")
-            print(" It needs a compact re-layout (each qubit has roughly 880 um of conductor in total), not more tuning.")
-    print("wrote stage4_extracted.json" + ("" if len(done) == 2 else f" (dies done so far: {', '.join(done)})"))
+            print(f"FINDING: this layout is over its island capacitance budget by up to {worst:.2f}x; see the table above.")
+            print(" Capacitance per um of conductor is about 0.1 fF, so check the conductor length attached to each qubit.")
+    print(f"wrote stage4{tagv}_extracted.json" + ("" if len(done) == 2 else f" (dies done so far: {', '.join(done)})"))
 
 
 if __name__ == "__main__":
-    main([c for c in (sys.argv[1] if len(sys.argv) > 1 else "KH")])
+    main([c for c in (sys.argv[1] if len(sys.argv) > 1 else "KH")], sys.argv[2] if len(sys.argv) > 2 else "v2")

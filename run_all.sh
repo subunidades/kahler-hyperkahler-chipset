@@ -7,4 +7,5 @@ python -W ignore chipset.py
 python -W ignore stage1_budget.py
 python -W ignore stage2_quantization.py
 python -W ignore stage3_layout.py
+python -W ignore stage3b_layout.py
 python -u -W ignore stage4_extract.py

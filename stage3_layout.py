@@ -103,6 +103,7 @@ class Layout:
         s.etch, s.nets, s.jj1, s.jj2, s.straps = [], {}, [], [], []
         s.junctions, s.ports, s.shorted, s.lengths, s.min_r = [], [], set(), {}, 1e9
         s.stitch_failed, s.heads = [], []
+        s.head_keepout = 120.
 
     def add(s, net, poly):
         s.nets.setdefault(net, []).append(poly)
@@ -186,7 +187,7 @@ class Layout:
         s.net_u = {n: unary_union(p) for n, p in s.nets.items()}
         s.metal = unary_union([s.ground] + list(s.net_u.values()))
         s.sensitive = unary_union([v.buffer(100) for n, v in s.net_u.items() if kind(n) == "island"]
-                                  + [g.buffer(60) for g in s.jj1 + s.jj2] + [g.buffer(120) for g in s.heads])
+                                  + [g.buffer(60) for g in s.jj1 + s.jj2] + [g.buffer(s.head_keepout) for g in s.heads])
 
     def comps(s):
         g = s.ground
